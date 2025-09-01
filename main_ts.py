@@ -28,6 +28,8 @@ from utils.utils import adjust_learning_rate
 from utils.utils import AverageMeter,save_model
 from utils.utils import compute_dice,compute_pa,compute_single_avg_score
 from utils.vis import vis_result
+##### Matplotlib #####
+import matplotlib.pyplot as plt
 
 # list devices cuda
 def print_cuda_devices():
@@ -43,8 +45,64 @@ logging.basicConfig(format=FORMAT)
 logger_vis = logging.getLogger(__name__)
 logger_vis.setLevel(logging.DEBUG)
 
+#funcion auxiliar
+def plot_segmentation_stage1(pred_seg1_np):
+    import matplotlib.patches as mpatches
+    # Definir colores para cada clase
+    # 0: fondo, 1: capas retinianas agrupadas, 2: disco óptico
+    colors = {
+        0: (0, 0, 0),        # negro para fondo
+        1: (0, 1, 0),        # verde para capas retinianas
+        2: (1, 0, 0),        # rojo para disco óptico
+    }
+    # Crear un mapa RGB
+    seg_rgb = np.zeros((*pred_seg1_np.shape, 3), dtype=np.float32)
+    for k, v in colors.items():
+        seg_rgb[pred_seg1_np == k] = v
+
+    plt.figure(figsize=(6, 6))
+    plt.imshow(seg_rgb)
+    plt.title('Segmentación Inicial (Stage 1)')
+    # Crear leyenda
+    legend_patches = [
+        mpatches.Patch(color=colors[0], label='Fondo'),
+        mpatches.Patch(color=colors[1], label='Capas retinianas'),
+        mpatches.Patch(color=colors[2], label='Disco óptico'),
+    ]
+    plt.legend(handles=legend_patches, loc='upper right')
+    plt.axis('off')
+    plt.show()
+
+def plot_segmentation_final(pred_seg_np):
+    import matplotlib.patches as mpatches
+    # Usar la paleta tab20 para hasta 11 clases
+    cmap = plt.get_cmap('tab20')
+    colors = [cmap(i) for i in range(11)]
+    # Crear un mapa RGB
+    seg_rgb = np.zeros((*pred_seg_np.shape, 3), dtype=np.float32)
+    for k in range(11):
+        seg_rgb[pred_seg_np == k] = colors[k][:3]  # Ignorar el canal alpha
+
+    plt.figure(figsize=(7, 7))
+    plt.imshow(seg_rgb)
+    plt.title('Segmentación Final (11 clases)')
+    legend_labels = [
+        'Fondo', 'Capa 1', 'Capa 2', 'Capa 3', 'Capa 4', 'Capa 5',
+        'Capa 6', 'Capa 7', 'Capa 8', 'Capa 9', 'Disco óptico'
+    ]
+    legend_patches = [
+        mpatches.Patch(color=colors[i][:3], label=legend_labels[i]) for i in range(11)
+    ]
+    plt.legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
 # training process
 def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,print_freq=10):
+
+    ## This is un epoch training ##
+
    # set the AverageMeter 
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -53,6 +111,8 @@ def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,prin
     # switch to train mode
     model.train()
     end = time.time()
+
+    # Iteramos sobre los batches del trainloader
     for i, (input, target) in enumerate(train_loader):
         input_var = Variable(input).cuda()
         target_var_seg = Variable(target).cuda()
@@ -67,6 +127,25 @@ def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,prin
 
         # forward
         output_seg1,_,output_seg = model(input_var1)
+
+
+        #Esta primera segmentación es para separar la retina y disco optico del fondo solamente. 
+        #ayudando asi a la posterior segmentación mas refinada de todas las capas de la retina.
+        _, pred_seg1 = torch.max(output_seg1, 1)
+        pred_seg1_np = pred_seg1.cpu().data.numpy()[0].astype('uint8')
+        # plt.imshow(pred_seg1_np, cmap='tab20')
+        # plt.title('Primer Stage - Segmentación')
+        # plt.colorbar()
+        # plt.show()
+
+        # plot_segmentation_stage1(pred_seg1_np)
+
+        _, pred_seg = torch.max(output_seg, 1)
+        pred_seg_np = pred_seg.cpu().data.numpy()[0].astype('uint8')
+        plot_segmentation_final(pred_seg_np)
+
+
+        ## El primer stage es una segmentación mas gruesa
         # modify label for the first stage network
         target_var_seg1[target_var_seg==0]=0
         target_var_seg1[target_var_seg==1]=1
@@ -155,7 +234,7 @@ def eval(phase, args, eval_data_loader, model, result_path = None, logger = None
             _, pred_seg = torch.max(output_seg, 1)
             # save visualized result
             pred_seg = pred_seg.cpu().data.numpy().astype('uint8')
-            if phase == 'eval' or phase == 'test':
+            if phase == 'eval' or phase == 'test' or phase == 'val':
                 imt = (imt.squeeze().numpy()).astype('uint8')
                 ant = label.numpy().astype('uint8')
                 save_dir = osp.join(result_path, 'vis')
@@ -298,6 +377,8 @@ def train_seg(args,train_result_path,train_loader,eval_loader):
 
         # input('Press Enter to continue...')  #############
 
+        # Se valida en cada epoch
+
         # train for one epoch
         loss,dice_train,dice_1,dice_2,dice_3,dice_4,dice_5,dice_6,dice_7,dice_8,dice_9,dice_10 = train(args,train_loader, model,criterion1, criterion2, optimizer,epoch)
         # evaluate on validation set
@@ -393,6 +474,12 @@ def main():
     # print("Using device:", device)
     ##### config #####
     args = parse_args()
+    print("Argumentos de entrada:")
+    for k, v in vars(args).items():
+        print(f"  {k}: {v}")
+
+    input('Pulsa enter para ver los tamaños...')  #############
+
     seed = 1234
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -430,12 +517,30 @@ def main():
     mask_t = torch.from_numpy(np.array(mask))
     print("Imagen shape:", img_t.shape, "Máscara shape:", mask_t.shape)
 
+    
+
     train_loader = torch.utils.data.DataLoader(train_dataset,batch_size=args.batch_size, shuffle=True, num_workers=args.workers, pin_memory=False, drop_last=True)
     print('train_loader length:',len(train_loader))
     eval_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=False)
     print('eval_loader length:',len(eval_loader))
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=False)
     print('test_loader length:',len(test_loader))
+
+    for images, masks in train_loader:
+        print("Batch de imágenes shape:", images.shape)
+        print("Batch de máscaras shape:", masks.shape)
+        break
+
+    plt.figure(figsize=(10,4))
+    plt.subplot(1,2,1)
+    plt.imshow(img_t, cmap='gray')
+    plt.title('Imagen OCT')
+    plt.subplot(1,2,2)
+    plt.imshow(mask_t, cmap='tab20')
+    plt.title('Máscara')
+    plt.show()
+
+    input('Pulsa enter para entrenamiento...')  #############
 
     # #print the shape of the data
     # for images, masks in train_loader:
@@ -444,6 +549,13 @@ def main():
 
     # print('train batch num:',len(train_loader))
     
+    # Coger una mascara y printear el numero de clases
+    # mask = Image.open(train_dataset.label_list[0])
+    # mask_t = torch.from_numpy(np.array(mask))
+    # print("Máscara shape:", mask_t.shape)
+    # print("Número de clases:", torch.unique(mask_t).numel())
+
+    # input('Press Enter to continue...')  #############
 
     ##### train #####
     train_seg(args,train_result_path,train_loader,eval_loader)

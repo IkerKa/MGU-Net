@@ -3,7 +3,7 @@
 # @Author:Jiaxuan Li
 ##### System library #####
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import os.path as osp
 from os.path import exists
 import argparse
@@ -13,6 +13,8 @@ import time
 import copy
 ##### pytorch library #####
 import torch
+from PIL import Image
+import numpy as np
 from torch import nn
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
@@ -26,6 +28,14 @@ from utils.utils import adjust_learning_rate
 from utils.utils import AverageMeter,save_model
 from utils.utils import compute_dice,compute_pa,compute_single_avg_score
 from utils.vis import vis_result
+
+# list devices cuda
+def print_cuda_devices():
+    print("Available CUDA devices:")
+    for i in range(torch.cuda.device_count()):
+        print(f"Device {i}: {torch.cuda.get_device_name(i)}")
+
+
 
 # logger vis
 FORMAT = "[%(asctime)-15s %(filename)s:%(lineno)d %(funcName)s] %(message)s"
@@ -44,11 +54,17 @@ def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,prin
     model.train()
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
-        # variable
         input_var = Variable(input).cuda()
         target_var_seg = Variable(target).cuda()
+        # input_var = input.cuda(non_blocking=True)
+        # target_var_seg = target.cuda(non_blocking=True)
+
         target_var_seg1 = copy.deepcopy(target_var_seg)
         input_var1 = copy.deepcopy(input_var)
+        # target_var_seg1 = target_var_seg.clone()
+        # input_var1 = input_var.clone()
+
+
         # forward
         output_seg1,_,output_seg = model(input_var1)
         # modify label for the first stage network
@@ -255,12 +271,15 @@ def train_seg(args,train_result_path,train_loader,eval_loader):
     logger_train = Logger(osp.join(train_result_path,'dice_epoch.txt'), title='dice',resume=False)
     logger_train.set_names(['Epoch','Dice_Train','Dice_Val','Dice_1','Dice_11','Dice_2','Dice_22','Dice_3','Dice_33','Dice_4','Dice_44','Dice_5','Dice_55','Dice_6','Dice_66','Dice_7','Dice_77','Dice_8','Dice_88','Dice_9','Dice_99','Dice_10','Dice_1010',])
     # print hyperparameters
-    for k, v in args.__dict__.items():
-        print(k, ':', v)
+    print_hyper = False
+    if print_hyper:
+        for k, v in args.__dict__.items():
+            print(k, ':', v)
+
     # load the network
     net = net_builder(args.name)
     model = torch.nn.DataParallel(net).cuda()
-    print('#'*15,args.name,'#'*15)
+    # print('#'*15,args.name,'#'*15)
     # define loss function
     criterion1 = loss_builder1()
     criterion2 = loss_builder2()
@@ -276,6 +295,9 @@ def train_seg(args,train_result_path,train_loader,eval_loader):
     for epoch in range(start_epoch, args.epochs):
         lr = adjust_learning_rate(args,optimizer, epoch)
         logger_vis.info('Epoch: [{0}]\t'.format(epoch))
+
+        # input('Press Enter to continue...')  #############
+
         # train for one epoch
         loss,dice_train,dice_1,dice_2,dice_3,dice_4,dice_5,dice_6,dice_7,dice_8,dice_9,dice_10 = train(args,train_loader, model,criterion1, criterion2, optimizer,epoch)
         # evaluate on validation set
@@ -355,7 +377,20 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+
+def pad_to_multiple(img, mask, multiple=32):
+    c, h, w = img.shape
+    pad_h = (multiple - h % multiple) % multiple
+    pad_w = (multiple - w % multiple) % multiple
+    img = torch.nn.functional.pad(img, (0, pad_w, 0, pad_h), mode='constant', value=0)
+    mask = torch.nn.functional.pad(mask, (0, pad_w, 0, pad_h), mode='constant', value=0)
+    return img, mask
+
 def main():
+
+    print_cuda_devices()
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # print("Using device:", device)
     ##### config #####
     args = parse_args()
     seed = 1234
@@ -365,25 +400,54 @@ def main():
     ##### result path setting #####
     tn = args.t 
     task_name = args.data_dir.split('/')[-2] + '/' + args.data_dir.split('/')[-1]
+
+    print('Task_name:',task_name)
+
     train_result_path = osp.join('result',task_name,'train',args.name + '_' +str(args.lr) + '_'+ tn)
     if not exists(train_result_path):
         os.makedirs(train_result_path)
     test_result_path = osp.join('result',task_name,'test',args.name + '_' +str(args.lr) + '_'+ tn)
     if not exists(test_result_path):
         os.makedirs(test_result_path)
+
+
     ##### load dataset #####
     info = json.load(open(osp.join(args.data_dir, 'info.json'), 'r'))
     normalize = dt.Normalize(mean=info['mean'], std=info['std'])
     t = []
     t.extend([dt.Label_Transform(),dt.ToTensor(),normalize])
     train_dataset = segList(args.data_dir, 'train', dt.Compose(t))
-    val_dataset = segList(args.data_dir, 'eval', dt.Compose(t))
+    print('train num:',len(train_dataset))
+    val_dataset = segList(args.data_dir, 'val', dt.Compose(t))
+    print('eval num:',len(val_dataset))
     test_dataset = segList(args.data_dir, 'test', dt.Compose(t))
-    train_loader = torch.utils.data.DataLoader(train_dataset,batch_size=args.batch_size, shuffle=True, num_workers=args.workers, pin_memory=True, drop_last=True)
+    print('test num:',len(test_dataset))
+
+    print("Probando lectura manual de imágenes y máscaras...")
+    img = Image.open(train_dataset.image_list[0])
+    mask = Image.open(train_dataset.label_list[0])
+    img_t = torch.from_numpy(np.array(img))
+    mask_t = torch.from_numpy(np.array(mask))
+    print("Imagen shape:", img_t.shape, "Máscara shape:", mask_t.shape)
+
+    train_loader = torch.utils.data.DataLoader(train_dataset,batch_size=args.batch_size, shuffle=True, num_workers=args.workers, pin_memory=False, drop_last=True)
+    print('train_loader length:',len(train_loader))
     eval_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=False)
+    print('eval_loader length:',len(eval_loader))
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=False)
+    print('test_loader length:',len(test_loader))
+
+    # #print the shape of the data
+    # for images, masks in train_loader:
+    #     print("Batch de imágenes shape:", images.shape, "Batch de máscaras shape:", masks.shape)
+    #     break
+
+    # print('train batch num:',len(train_loader))
+    
+
     ##### train #####
     train_seg(args,train_result_path,train_loader,eval_loader)
+    print('Training Finished!')
     ##### test #####
     model_best_path = osp.join(osp.join(train_result_path,'model'),'model_best.pth.tar')
     args.model_path = model_best_path

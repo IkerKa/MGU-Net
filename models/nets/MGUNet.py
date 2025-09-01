@@ -17,17 +17,20 @@ class  MGR_Module(nn.Module):
         self.pool1 = nn.MaxPool2d(kernel_size=[2, 2], stride=2)
         self.conv1_2 = Basconv(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.glou1 = nn.Sequential(OrderedDict([("GCN%02d" % i,GloRe_Unit(out_channels, out_channels, kernel=1)) for i in range(1)]))
-
+        #print("Tamaño pool1:", self.pool1)
+        
         self.conv2_1 = Basconv(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.pool2 = nn.MaxPool2d(kernel_size=[3, 3], stride=3)
         self.conv2_2 = Basconv(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.glou2 = nn.Sequential(OrderedDict([("GCN%02d" % i,GloRe_Unit(out_channels, int(out_channels/2), kernel=1)) for i in range(1)]))
+        #print("Tamaño pool2:", self.pool2)
 
         self.conv3_1 = Basconv(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.pool3 = nn.MaxPool2d(kernel_size=[5, 5], stride=5)
         self.conv3_2 = Basconv(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.glou3 = nn.Sequential(OrderedDict([("GCN%02d" % i,GloRe_Unit(out_channels, int(out_channels/2), kernel=1)) for i in range(1)]))
-        
+        #print("Tamaño pool3:", self.pool3)
+
         self.f1 = Basconv(in_channels=4*out_channels, out_channels=in_channels, kernel_size=1, padding=0)
 
     def forward(self, x):
@@ -39,14 +42,17 @@ class  MGR_Module(nn.Module):
         self.x1 = self.conv1_2(self.pool1(self.conv1_1(x)))
         self.g1 = self.glou1(self.x1)
         self.layer1 = F.interpolate(self.g1, size=(h, w), mode='bilinear', align_corners=True)
+        # print("Tamaño layer1:", self.layer1.shape)
 
         self.x2 = self.conv2_2(self.pool2(self.conv2_1(x)))
         self.g2 = self.glou2(self.x2)
         self.layer2 = F.interpolate(self.g2, size=(h, w), mode='bilinear', align_corners=True)
+        # print("Tamaño layer2:", self.layer2.shape)
 
         self.x3 = self.conv3_2(self.pool3(self.conv3_1(x)))
         self.g3= self.glou3(self.x3)
         self.layer3 = F.interpolate(self.g3, size=(h, w), mode='bilinear', align_corners=True)
+        # print("Tamaño layer3:", self.layer3.shape)
 
         out = torch.cat([self.g0, self.layer1, self.layer2, self.layer3], 1)
 

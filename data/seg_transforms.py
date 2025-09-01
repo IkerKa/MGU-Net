@@ -34,6 +34,27 @@ class Normalize(object):
             return image, label
 
 
+# Esto no esta obsoleto
+# class ToTensor(object):
+#     def __call__(self, pic, label=None):
+#         if isinstance(pic, np.ndarray):
+#             img = torch.from_numpy(pic)
+#         else:
+#             # Convierte PIL a numpy directamente
+#             img = torch.from_numpy(np.array(pic, np.uint8))
+
+#         # Asegura que está en formato CHW y float en [0,1]
+#         if img.ndim == 2:  # escala de grises
+#             img = img.unsqueeze(2)
+#         img = img.permute(2, 0, 1).contiguous()  # HWC -> CHW
+#         img = img.float().div(255)
+
+#         if label is None:
+#             return img,
+#         else:
+#             return img, torch.LongTensor(np.array(label, dtype=int))
+
+
 class ToTensor(object):
     """Converts a PIL.Image or numpy.ndarray (H x W x C) in the range
     [0, 255] to a torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0].
@@ -59,7 +80,7 @@ class ToTensor(object):
         if label is None:
             return img,
         else:
-            return img, torch.LongTensor(np.array(label, dtype=np.int))
+            return img, torch.LongTensor(np.array(label, dtype=int))
 
 
 class Compose(object):

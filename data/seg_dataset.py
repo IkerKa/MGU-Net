@@ -16,41 +16,37 @@ class segList(Dataset):
         self.data_dir = data_dir
         self.phase = phase
         self.transforms = transforms
-        self.image_list = None
-        self.label_list = None
-        self.bbox_list = None
-        self.read_lists()
+        self.image_list = get_list_dir(self.phase, 'img', self.data_dir)
+        self.label_list = get_list_dir(self.phase, 'mask', self.data_dir)
+        print('Total amount of {} images is : {}'.format(self.phase, len(self.image_list)))
 
     def __getitem__(self, index):
-        if self.phase == 'train':
-            self.image_list = get_list_dir(self.phase, 'img', self.data_dir)
-            self.label_list = get_list_dir(self.phase, 'mask', self.data_dir)
-            data = [Image.open(self.image_list[index])]
-            data.append(Image.open(self.label_list[index]))
-            data = list(self.transforms(*data))
-            data = [data[0],data[1].long()]
-            return tuple(data)
-        
-        if self.phase == 'eval' or 'test':
-            self.image_list = get_list_dir(self.phase, 'img', self.data_dir)
-            self.label_list = get_list_dir(self.phase, 'mask', self.data_dir)
-            data = [Image.open(self.image_list[index])]
-            imt = torch.from_numpy(np.array(data[0]))
-            data.append(Image.open(self.label_list[index]))
-            data = list(self.transforms(*data))
-            image = data[0]
-            label = data[1]
-            imn = self.image_list[index].split('/')[-1]
-            return (image,label.long(),imt,imn)
-
-        if self.phase == 'predict':
-            self.image_list = get_list_dir(self.phase, 'img', self.data_dir)
-            data = [Image.open(self.image_list[index])]
-            imt = torch.from_numpy(np.array(data[0]))
-            data = list(self.transforms(*data))
-            image = data[0]
-            imn = self.image_list[index].split('/')[-1]
-            return (image,imt,imn)
+        try:
+            if self.phase == 'train':
+                data = [Image.open(self.image_list[index])]
+                data.append(Image.open(self.label_list[index]))
+                data = list(self.transforms(*data))
+                data = [data[0], data[1].long()]
+                return tuple(data)
+            if self.phase in ['val','eval', 'test']:
+                data = [Image.open(self.image_list[index])]
+                imt = torch.from_numpy(np.array(data[0]))
+                data.append(Image.open(self.label_list[index]))
+                data = list(self.transforms(*data))
+                image = data[0]
+                label = data[1]
+                imn = os.path.basename(self.image_list[index])
+                return (image, label.long(), imt, imn)
+            if self.phase == 'predict':
+                data = [Image.open(self.image_list[index])]
+                imt = torch.from_numpy(np.array(data[0]))
+                data = list(self.transforms(*data))
+                image = data[0]
+                imn = os.path.basename(self.image_list[index])
+                return (image, imt, imn)
+        except Exception as e:
+            print(f"Error en index {index}: {e}")
+            raise e
 
     def __len__(self):
         return len(self.image_list)

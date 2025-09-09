@@ -28,6 +28,7 @@ from utils.utils import adjust_learning_rate
 from utils.utils import AverageMeter,save_model
 from utils.utils import compute_dice,compute_pa,compute_single_avg_score
 from utils.vis import vis_result
+import matplotlib.patches as mpatches
 ##### Matplotlib #####
 import matplotlib.pyplot as plt
 
@@ -46,46 +47,66 @@ logger_vis = logging.getLogger(__name__)
 logger_vis.setLevel(logging.DEBUG)
 
 #funcion auxiliar
-def plot_segmentation_stage1(pred_seg1_np):
+def plot_segmentation_collage(pred_seg1_np, pred_seg_np):
     import matplotlib.patches as mpatches
-    # Definir colores para cada clase
-    # 0: fondo, 1: capas retinianas agrupadas, 2: disco óptico
-    colors = {
-        0: (0, 0, 0),        # negro para fondo
-        1: (0, 1, 0),        # verde para capas retinianas
-        2: (1, 0, 0),        # rojo para disco óptico
+    # Stage 1 colors
+    colors_stage1 = {
+        0: (0, 0, 0),        # fondo
+        1: (0, 1, 0),        # capas retinianas
+        2: (1, 0, 0),        # disco óptico
     }
-    # Crear un mapa RGB
-    seg_rgb = np.zeros((*pred_seg1_np.shape, 3), dtype=np.float32)
-    for k, v in colors.items():
-        seg_rgb[pred_seg1_np == k] = v
+    seg1_rgb = np.zeros((*pred_seg1_np.shape, 3), dtype=np.float32)
+    for k, v in colors_stage1.items():
+        seg1_rgb[pred_seg1_np == k] = v
 
-    plt.figure(figsize=(6, 6))
-    plt.imshow(seg_rgb)
-    plt.title('Segmentación Inicial (Stage 1)')
-    # Crear leyenda
-    legend_patches = [
-        mpatches.Patch(color=colors[0], label='Fondo'),
-        mpatches.Patch(color=colors[1], label='Capas retinianas'),
-        mpatches.Patch(color=colors[2], label='Disco óptico'),
+    # Stage final colors
+    cmap = plt.get_cmap('tab20')
+    colors_final = [cmap(i) for i in range(11)]
+    seg_final_rgb = np.zeros((*pred_seg_np.shape, 3), dtype=np.float32)
+    for k in range(11):
+        seg_final_rgb[pred_seg_np == k] = colors_final[k][:3]
+
+    # Plot collage
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    # Stage 1
+    axes[0].imshow(seg1_rgb)
+    axes[0].set_title('Segmentación Inicial (Stage 1)')
+    legend_patches1 = [
+        mpatches.Patch(color=colors_stage1[0], label='Fondo'),
+        mpatches.Patch(color=colors_stage1[1], label='Capas retinianas'),
+        mpatches.Patch(color=colors_stage1[2], label='Disco óptico'),
     ]
-    plt.legend(handles=legend_patches, loc='upper right')
-    plt.axis('off')
+    axes[0].legend(handles=legend_patches1, loc='upper right', fontsize='small')
+    axes[0].axis('off')
+    # Final
+    axes[1].imshow(seg_final_rgb)
+    axes[1].set_title('Segmentación Final (11 clases)')
+    legend_labels = [
+        'Fondo', 'Capa 1', 'Capa 2', 'Capa 3', 'Capa 4', 'Capa 5',
+        'Capa 6', 'Capa 7', 'Capa 8', 'Capa 9', 'Disco óptico'
+    ]
+    legend_patches2 = [
+        mpatches.Patch(color=colors_final[i][:3], label=legend_labels[i]) for i in range(11)
+    ]
+    axes[1].legend(handles=legend_patches2, loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+    axes[1].axis('off')
+    plt.tight_layout()
     plt.show()
 
-def plot_segmentation_final(pred_seg_np):
-    import matplotlib.patches as mpatches
-    # Usar la paleta tab20 para hasta 11 clases
+def plot_comparison(pred_seg2_np, target_np):
+
     cmap = plt.get_cmap('tab20')
     colors = [cmap(i) for i in range(11)]
-    # Crear un mapa RGB
-    seg_rgb = np.zeros((*pred_seg_np.shape, 3), dtype=np.float32)
+    seg_pred_rgb = np.zeros((*pred_seg2_np.shape, 3), dtype=np.float32)
+    seg_target_rgb = np.zeros((*target_np.shape, 3), dtype=np.float32)
     for k in range(11):
-        seg_rgb[pred_seg_np == k] = colors[k][:3]  # Ignorar el canal alpha
-
-    plt.figure(figsize=(7, 7))
-    plt.imshow(seg_rgb)
-    plt.title('Segmentación Final (11 clases)')
+        seg_pred_rgb[pred_seg2_np == k] = colors[k][:3]
+        seg_target_rgb[target_np == k] = colors[k][:3]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    axes[0].imshow(seg_target_rgb)
+    axes[0].set_title('Máscara Manual (Ground Truth)')
+    axes[1].imshow(seg_pred_rgb)
+    axes[1].set_title('Segmentación Predicha (Stage 2)')
     legend_labels = [
         'Fondo', 'Capa 1', 'Capa 2', 'Capa 3', 'Capa 4', 'Capa 5',
         'Capa 6', 'Capa 7', 'Capa 8', 'Capa 9', 'Disco óptico'
@@ -93,10 +114,12 @@ def plot_segmentation_final(pred_seg_np):
     legend_patches = [
         mpatches.Patch(color=colors[i][:3], label=legend_labels[i]) for i in range(11)
     ]
-    plt.legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
-    plt.axis('off')
+    axes[1].legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+    axes[0].axis('off')
+    axes[1].axis('off')
     plt.tight_layout()
     plt.show()
+
 
 # training process
 def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,print_freq=10):
@@ -111,6 +134,11 @@ def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,prin
     # switch to train mode
     model.train()
     end = time.time()
+
+    losses_per_batch = []
+    #guardar los dices por clase
+    dices_per_batch = [[] for _ in range(11)]  # 11 listas, una por clase
+
 
     # Iteramos sobre los batches del trainloader
     for i, (input, target) in enumerate(train_loader):
@@ -133,17 +161,12 @@ def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,prin
         #ayudando asi a la posterior segmentación mas refinada de todas las capas de la retina.
         _, pred_seg1 = torch.max(output_seg1, 1)
         pred_seg1_np = pred_seg1.cpu().data.numpy()[0].astype('uint8')
-        # plt.imshow(pred_seg1_np, cmap='tab20')
-        # plt.title('Primer Stage - Segmentación')
-        # plt.colorbar()
-        # plt.show()
-
-        # plot_segmentation_stage1(pred_seg1_np)
-
         _, pred_seg = torch.max(output_seg, 1)
         pred_seg_np = pred_seg.cpu().data.numpy()[0].astype('uint8')
-        plot_segmentation_final(pred_seg_np)
 
+        if i % (print_freq*10) == 0:
+            plot_segmentation_collage(pred_seg1_np, pred_seg_np)
+            plot_comparison(pred_seg_np, target_var_seg.cpu().data.numpy()[0].astype('uint8'))
 
         ## El primer stage es una segmentación mas gruesa
         # modify label for the first stage network
@@ -208,7 +231,28 @@ def train(args,train_loader, model, criterion1, criterion2, optimizer,epoch,prin
                         'Dice_9 {dice_9.val:.4f} ({dice_9.avg:.4f})\t'
                         'Dice_10 {dice_10.val:.4f} ({dice_10.avg:.4f})\t'.format(
                 epoch, i, len(train_loader), batch_time=batch_time,dice = dice,dice_1=Dice_1,dice_2=Dice_2,dice_3=Dice_3,dice_4=Dice_4,dice_5=Dice_5,dice_6=Dice_6,dice_7=Dice_7,dice_8=Dice_8,dice_9=Dice_9,dice_10=Dice_10))
-            print('Loss :',loss.cpu().data.numpy())           
+            print('Loss :',loss.cpu().data.numpy())  
+
+        # losses_per_batch.append(loss.item())
+        # for j in range(11):
+        #     dices_per_batch[j].append(ret_d[j])
+
+    #plot loss of the current epoch
+    # plt.figure()
+    # plt.plot(losses_per_batch)
+    # plt.title('Loss per Batch')
+    # plt.xlabel('Batch')
+    # plt.ylabel('Loss')
+    # plt.show()
+
+    # plt.figure()
+    # for j in range(10):
+    #     plt.plot(dices_per_batch[j], label=f'Dice {j}')
+    # plt.title('Dice Score per Class')
+    # plt.xlabel('Batch')
+    # plt.ylabel('Dice Score')
+    # plt.legend()
+    # plt.show()
     return losses.avg,dice.avg,Dice_1.avg,Dice_2.avg,Dice_3.avg,Dice_4.avg,Dice_5.avg,Dice_6.avg,Dice_7.avg,Dice_8.avg,Dice_9.avg,Dice_10.avg
 
 # evaluation process
